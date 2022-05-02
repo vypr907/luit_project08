@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  BATTLEGRP:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.10.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Join 
+            - ''
+            - - !Ref 'AWS::StackName'
+              - '-VPC'
+    
+# making a hole
+  SLIPSPACERUPTURE:
+    Type: 'AWS::EC2::InternetGateway'
+    DependsOn: BATTLEGRP
+
+#connecting the gateway to the VPC  
+  NAVDATA:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref BATTLEGRP
+      InternetGatewayId: !Ref SLIPSPACERUPTURE
+    
+  # subnet one
+  UNSCPILLAROFAUTUMN:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BATTLEGRP
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.10.0.0/17
+      MapPublicIpOnLaunch: true
+      
+  # subnet two
+  UNSCSPIRITOFFIRE:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BATTLEGRP
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.10.128.0/17
+      MapPublicIpOnLaunch: true 
+
+  # too tired to be clever rn
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: NAVDATA
+    Properties:
+      Domain: vpc
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: NAVDATA
+    Properties:
+      Domain: vpc
+  #------------------------------------------------------------------------------------------------------------------------
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref UNSCPILLAROFAUTUMN
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref UNSCSPIRITOFFIRE
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref BATTLEGRP
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NAVDATA
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SLIPSPACERUPTURE
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref UNSCPILLAROFAUTUMN
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref UNSCSPIRITOFFIRE
+
+  #------------------------------------------------------------------------------------------------------------------------
+
+  # like armour, we're going decide what stays in and what stays out
+  MJOLNIR:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: mjolnir-sg
+      GroupDescription: lock it down SPARTAN
+      VpcId: !Ref BATTLEGRP
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 69b0ab17-296b-4f90-93cf-ba540bd20a19
+  # the set of configs for each new instance
+  UNSCTASKINGORDERS:
+    Type: 'AWS::EC2::LaunchTemplate'
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-launchTemplate4ASG'
+      LaunchTemplateData:
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            DeleteOnTermination: true
+        ImageId: ami-0f9fc25dd2506cf6d
+        InstanceType: t2.micro
+        UserData:
+          'Fn::Base64': !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install nginx -y
+            service nginx start
+        SecurityGroupIds: 
+        - !Ref MJOLNIR
+    
+  # controls the deployment of assets
+  FLEETCOM:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref UNSCTASKINGORDERS
+      MaxSize: '5'
+      MinSize: '2'
+      DesiredCapacity: '2'
+      VPCZoneIdentifier: !Ref BATTLEGRP
+      MetricsCollection:
+        - Granularity: 30Seconds
+  
+  # policy that keeps things cool
+  COREMELTDOWN:
+    Type: 'AWS::AutoScaling::ScalingPolicy'
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref FLEETCOM
+      ScalingAdjustment: '1'
+   
+  # if cpu goes above 80% call for reinforcements
+  PROXIMITYALERT:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      EvaluationPeriods: '1'
+      Statistic: Average
+      Threshold: '80'
+      AlarmDescription: Alarm if CPU higher than 80%
+      Period: '60'
+      AlarmActions:
+        - !Ref COREMELTDOWN
+      Namespace: AWS/EC2
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: FLEETCOM
+      ComparisonOperator: GreaterThanThreshold
+      MetricName: CPUUtilization
+    
