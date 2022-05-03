@@ -1,5 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
 Resources:
+# --------------------NETWORK-----------------------------------------------------
+  # creating the VPC
   BATTLEGRP:
     Type: 'AWS::EC2::VPC'
     Properties:
@@ -13,13 +15,13 @@ Resources:
             - - !Ref 'AWS::StackName'
               - '-VPC'
     
-# making a hole
+  # making a hole
   SLIPSPACERUPTURE:
     Type: 'AWS::EC2::InternetGateway'
     DependsOn: BATTLEGRP
 
-#connecting the gateway to the VPC  
-  NAVDATA:
+  #connecting the gateway to the VPC  
+  COORDINATESLOCK:
     Type: 'AWS::EC2::VPCGatewayAttachment'
     Properties:
       VpcId: !Ref BATTLEGRP
@@ -43,67 +45,54 @@ Resources:
       CidrBlock: 10.10.128.0/17
       MapPublicIpOnLaunch: true 
 
-  # too tired to be clever rn
-  NatGateway1EIP:
-    Type: AWS::EC2::EIP
-    DependsOn: NAVDATA
-    Properties:
-      Domain: vpc
-  NatGateway2EIP:
-    Type: AWS::EC2::EIP
-    DependsOn: NAVDATA
-    Properties:
-      Domain: vpc
-  #------------------------------------------------------------------------------------------------------------------------
-  NatGateway1:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NatGateway1EIP.AllocationId
-      SubnetId: !Ref UNSCPILLAROFAUTUMN
-
-  NatGateway2:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt NatGateway2EIP.AllocationId
-      SubnetId: !Ref UNSCSPIRITOFFIRE
-
-  PublicRouteTable:
+  # PublicRouteTable, or data packet with navigational data for battlegroup
+  NAVDATA:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref BATTLEGRP
 
-  DefaultPublicRoute:
+  # default public route, or specifics for getting through the slipspace portal
+  TELEMETRY:
     Type: AWS::EC2::Route
-    DependsOn: NAVDATA
+    DependsOn: COORDINATESLOCK
     Properties:
-      RouteTableId: !Ref PublicRouteTable
+      RouteTableId: !Ref NAVDATA
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref SLIPSPACERUPTURE
 
-  PublicSubnet1RouteTableAssociation:
+  # public subnet 1 route table association, or creating a packet of NAVDATA for the ship (subnet)
+  NAVDATAPOA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PublicRouteTable
+      RouteTableId: !Ref NAVDATA
       SubnetId: !Ref UNSCPILLAROFAUTUMN
 
-  PublicSubnet2RouteTableAssociation:
+  # public subnet 2 route table association, or creating a packet of NAVDATA for the ship (subnet)
+  NAVDATASOF:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      RouteTableId: !Ref PublicRouteTable
+      RouteTableId: !Ref NAVDATA
       SubnetId: !Ref UNSCSPIRITOFFIRE
 
   #------------------------------------------------------------------------------------------------------------------------
 
-  # like armour, we're going decide what stays in and what stays out
+  # like armour, we're going decide what stays in and what stays out. For demo purposes, all is fair game
   MJOLNIR:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupName: mjolnir-sg
       GroupDescription: lock it down SPARTAN
       VpcId: !Ref BATTLEGRP
-    Metadata:
-      'AWS::CloudFormation::Designer':
-        id: 69b0ab17-296b-4f90-93cf-ba540bd20a19
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+  
   # the set of configs for each new instance
   UNSCTASKINGORDERS:
     Type: 'AWS::EC2::LaunchTemplate'
@@ -114,16 +103,25 @@ Resources:
           - DeviceIndex: 0
             AssociatePublicIpAddress: true
             DeleteOnTermination: true
+            Groups:
+              - !Ref MJOLNIR
         ImageId: ami-0f9fc25dd2506cf6d
         InstanceType: t2.micro
         UserData:
-          'Fn::Base64': !Sub |
+          Fn::Base64: !Sub |
             #!/bin/bash
             yum update -y
-            yum install nginx -y
-            service nginx start
-        SecurityGroupIds: 
-        - !Ref MJOLNIR
+            amazon-linux-extras install nginx1.12
+            nginx -v
+            systemctl start nginx
+            systemctl enable nginx
+            chmod 2775 /usr/share/nginx/html
+            instAZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+            echo -e "<head><style>body {background-image: url("https://free4kwallpapers.com/uploads/originals/2020/05/06/-halo-infinite-wallpaper.jpg");background-repeat: no-repeat;background-attachment: fixed;background-size: cover;}p {color: #32a852;}</style></head><body><center><h1><p>Welcome to vyprTECH HQ! We are currently in Availability Zone: AZID</p></h1><img src="https://live.staticflickr.com/65535/52008997046_15bcd36566_o.png" alt="programmer avatar" width="200" height="350"></center></body>" >> /usr/share/nginx/html/index.txt
+            sed "s/AZID/$instAZ/" /usr/share/nginx/html/index.txt > /usr/share/nginx/html/index.html
+        # temp commenting out to attempt resolving "when a network interface is provided, the security groups must be a part of it"
+        #SecurityGroupIds: 
+        #  - !Ref MJOLNIR
     
   # controls the deployment of assets
   FLEETCOM:
@@ -131,12 +129,15 @@ Resources:
     Properties:
       LaunchTemplate:
         LaunchTemplateId: !Ref UNSCTASKINGORDERS
+        Version: !GetAtt UNSCTASKINGORDERS.LatestVersionNumber
       MaxSize: '5'
       MinSize: '2'
       DesiredCapacity: '2'
-      VPCZoneIdentifier: !Ref BATTLEGRP
+      VPCZoneIdentifier: 
+        - !Ref UNSCPILLAROFAUTUMN
+        - !Ref UNSCSPIRITOFFIRE
       MetricsCollection:
-        - Granularity: 30Seconds
+        - Granularity: 1Minute
   
   # policy that keeps things cool
   COREMELTDOWN:
@@ -164,4 +165,13 @@ Resources:
             Ref: FLEETCOM
       ComparisonOperator: GreaterThanThreshold
       MetricName: CPUUtilization
-    
+# this will be something I try at a later time
+#Outputs:
+#  SVCTAG:
+#    Description: URL of the test site
+#    Value: !Join 
+#      - ''
+#      - - 'http://'
+#        - !GetAtt
+#          - FLEETCOM
+#          - DNSName 
